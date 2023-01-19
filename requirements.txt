@@ -1,0 +1,6 @@
+torch=1.11.0
+cudatoolkit=11.2
+torchvision
+scipy
+tensorboard
+Pillow
