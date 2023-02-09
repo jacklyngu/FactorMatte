@@ -48,10 +48,12 @@ def render_png(image, background='checker'):
 
 
 def add_title(image, title_text):
+    Print('please put a dir for a font here')
+    font_dir = ''
     from PIL import Image, ImageFont, ImageDraw 
     import matplotlib.font_manager as fm
     image = Image.fromarray(image)
-    title_font = ImageFont.truetype('/home/zg45/anaconda3/envs/omnimatte1/lib/python3.8/site-packages/matplotlib/mpl-data/fonts/ttf/DejaVuSans.ttf', 35)
+    title_font = ImageFont.truetype(font_dir, 35)
     image_editable = ImageDraw.Draw(image)
     image_editable.text((10,10), title_text, (255,255,255), stroke_fill=(0,0,0), font=title_font, stroke_width=3)
     return np.asarray(image)
