@@ -47,45 +47,52 @@ To train on your custom video, please prepare it as follows: (Assume all file na
 2. Arrange corresponding binary masks in the same order and put them in `mask/01` folder.
 3. run `data/misc_data_process.py` to copy `mask/01` to `mask_nocushionmask/02`, and generate `mask_nocushionmask/01`. Please refer to the doc in data/misc_data_process.py for details. (Redundant, TODO: generate this on the fly.)
 4. Estimate the homography between every two consecutive frames and flatten each matrix following the template of data/homographies.txt 
-We provide a script in data/keypoint_homo_short.ipynb. It'll generate a file homographies_raw.txt. To get the final homographies.txt, run 
+We provide a script in data/keypoint_homography_estimate.ipynb. It'll generate a file homographies_raw.txt. To get the final homographies.txt, run 
 `python datasets/homography.py  --homography_path ./datasets/[your_folder_name]/homographies_raw.txt --width [W] --height [H]`
 
 5. Flow estimation by RAFT:
 `python video_completion.py --path datasets/[your_folder_name]/rgb --model weight/raft-things.pth --step 1`
 <br /> 
+
 `python video_completion.py --path datasets/[your_folder_name]/rgb --model weight/raft-things.pth --step 4`
 <br /> 
+
 `python video_completion.py --path datasets/[your_folder_name]/rgb --model weight/raft-things.pth --step 8`
 <br /> 
 (As mentioned in section 7, we use multiple time scales (1, 4, 8) to reinforce consistency.)
 <br /> 
+Move the generated flow matrices to your data folder:
+
 `mv RAFT_result/datasets[your_folder_name]rgb/*flow* datasets/[your_folder_name]`
 
 6. Confidence estimate for flows:
 `python datasets/confidence.py --dataroot ./datasets/[your_folder_name] --step 1`
 <br /> 
+
 `python datasets/confidence.py --dataroot ./datasets/[your_folder_name] --step 4`
 <br /> 
+
 `python datasets/confidence.py --dataroot ./datasets/[your_folder_name] --step 8`
 
-7. Find the simpler frames if you want to use the tricks in Section 7. Separate the frame indices as in `data/noninteraction_ind.txt`. If there's no such frames, simply write "0, 1" in that file.
+7. Find the simpler frames if you want to use the tricks in Section 7. Separate the frame indices as in `data/noninteraction_ind.txt`. If there's no such frames or you wish not to use such tricks, simply write "0, 1" in that file.
 
 8. After Stage 1, run `python gen_foregroundPosEx.py` to generate positive examples for the foreground. Run `data/gen_backgroundPosEx.ipynb` to generate positive examples for the background.
 
 9. In short, there should be these folders in data/[your_folder_name]:
+<br /> 
 forward_flow_step1, forward_flow_step4, forward_flow_step8
 <br /> 
 backward_flow_step1, backward_flow_step4, backward_flow_step8
 <br /> 
 confidence_step1, confidence_step4, confidence_step8
 <br /> 
-homographies.txt
+homographies.txt (if you use data/keypoint_homography_estimate.ipynb, there should also be a "homographies_raw.txt")
 <br /> 
 mask_nocushionmask (2 subfolders: "01", "02")
 <br /> 
 mask (1 subfolder containing the segmentaion mask of the foreground object: "01")
 <br /> 
-noninteraction_ind
+noninteraction_ind.txt
 <br /> 
 zbar.pth (Automatically generated to make sure the model starts with a fixed random noise.)
 <br /> 
