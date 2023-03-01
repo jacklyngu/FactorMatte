@@ -147,13 +147,13 @@ def video_completion(args):
     #        glob.glob(os.path.join(args.path, '*.jpg'))
 
     # Obtains imgH, imgW and nFrame.
-    imgH, imgW = np.array(Image.open(filename_list[0])).shape[:2]
+    imgH, imgW = np.array(Image.open(filename_list[0]).convert('RGB')).shape[:2]
     nFrame = len(filename_list)
 
     # Loads video.
     video = []
     for filename in sorted(filename_list):
-        video.append(torch.from_numpy(np.array(Image.open(filename)).astype(np.uint8)).permute(2, 0, 1).float())
+        video.append(torch.from_numpy(np.array(Image.open(filename).convert('RGB')).astype(np.uint8)).permute(2, 0, 1).float())
 
     video = torch.stack(video, dim=0)
     video = video.to('cuda')
