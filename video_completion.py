@@ -181,7 +181,7 @@ if __name__ == '__main__':
     parser.add_argument('--step', default=1, type=int)
 
     # RAFT
-    parser.add_argument('--model', default='../weight/raft-things.pth', help="restore checkpoint")
+    parser.add_argument('--model', default='weight/raft-things.pth', help="restore checkpoint")
     parser.add_argument('--small', action='store_true', help='use small model')
     parser.add_argument('--mixed_precision', action='store_true', help='use mixed precision')
     parser.add_argument('--alternate_corr', action='store_true', help='use efficent correlation implementation')

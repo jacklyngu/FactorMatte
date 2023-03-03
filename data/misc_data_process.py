@@ -1,3 +1,4 @@
+import argparse
 import os
 from PIL import Image
 import numpy as np
@@ -20,7 +21,7 @@ def gen_black_l1mask(p):
     Args:
         p (_type_): _description_
     """
-    os.mkdirs(os.path.join(p, 'mask_nocushionmask/01'), exists_ok=False)
+    os.makedirs(os.path.join(p, 'mask_nocushionmask/01'), exist_ok=False)
     shutil.copytree(os.path.join(p, 'mask/01'), os.path.join(p, 'mask_nocushionmask/02'))
     for f in os.listdir(os.path.join(p, 'mask_nocushionmask/02')):
         if 'png' in f:
@@ -35,7 +36,7 @@ def real_video_rgba_a(source_dir, dest_dir):
     Given RGBA images in source_dir, extract the Alpha channel and store in dest_dir.
     Used after Stage 1 if you want to manually clean up some predicted alphas.
     """
-    os.mkdir(dest_dir)
+    os.makedirs(dest_dir, exist_ok=False)
     for f in os.listdir(source_dir):
         if '.png' in f:
             print(f)
@@ -44,6 +45,10 @@ def real_video_rgba_a(source_dir, dest_dir):
             
 
 if __name__ == '__main__':
-    datadir = 'datasets/DVM_womanfall'
-    gen_black_l1mask(datadir)
+    parser = argparse.ArgumentParser()
+    # video completion
+    parser.add_argument('--dataroot', type=str, help='dataroot')
+    args = parser.parse_args()
+
+    gen_black_l1mask(args.dataroot)
     #     real_video_rgba_a('results/lucia_3layer_v4_rgbwarp1e-1_alphawarp1e-1_flowrecon1e-2/test_600_/images/rgba_l1/', 'datasets/lucia/dis_gt_alpha_stage2_res')
