@@ -272,22 +272,14 @@ class Factormatte(nn.Module):
 
             # Update the composite with this layer's RGBA output
             if i == 0:
-                if self.opt.isTrain:
-                    # web_dir = os.path.join(
-                    #     self.opt.results_dir,
-                    #     self.opt.name,
-                    #     "{}_{}_{}".format(
-                    #         self.opt.phase, self.opt.epoch, self.opt.test_suffix
-                    #     ),
-                    # )
-                    web_dir = os.path.join(self.opt.checkpoints_dir, self.opt.name)
-                    if "panorama.png" not in os.listdir(web_dir):
-                        from third_party import util
-
-                        panorama = util.util.tensor2im(rgba)
-                        panorama_img = Image.fromarray(panorama[:, :, :3])
-                        panorama_img.save(os.path.join(web_dir, "panorama.png"))
-                        print("panorama BG saved")
+                if self.opt.get_bg:
+                    from third_party import util
+                    panorama = util.util.tensor2im(rgba[:, :3])
+                    panorama_img = Image.fromarray(panorama)
+                    panorama_img.save(os.path.join(self.opt.dataroot, "bg_gt.png"))
+                    print("panorama BG saved. Now exit since this is only for producing the bg_gt.png. \
+                    Expect program aborted due to TypeError...")
+                    return
 
                 if not self.opt.bg_noise:
                     rgba = input_i[:, -4:]

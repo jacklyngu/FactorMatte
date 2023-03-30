@@ -72,7 +72,7 @@ if __name__ == "__main__":
     model.do_cam_adj = True #False
     for i, data in enumerate(dataset):
 #         print(i)
-#         if i < 10:
+#         if i < 130:
 #             continue
         if i >= opt.num_test:  # only apply our model to opt.num_test images.
             break

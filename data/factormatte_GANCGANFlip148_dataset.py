@@ -87,10 +87,10 @@ class FactormatteGANCGANFlip148Dataset(BaseDataset):
         parser.add_argument("--in_c", type=int, default=16, help="# input channels")
         parser.add_argument("--jitter_rate", type=float, default=0.75, help="")
         parser.add_argument(
-            "--init_flowmask",
+            "--use_cleaned_mask_noninter",
             action="store_true",
-            help="if true, initialize non-interactive mask with\
-        flow != 0 parts.",
+            help="if true, use manually cleaned up foregroud masks for non-interaction frames, \
+                which should be stored in folders called dis_gt_alpha_stage+str(stage)",
         )
         parser.add_argument(
             "--pos_ex_dirs",
@@ -386,7 +386,7 @@ class FactormatteGANCGANFlip148Dataset(BaseDataset):
         ]
 #         binary_masks = (torch.stack(masks) > 0).float()
 
-        if self.opt.init_flowmask:
+        if self.opt.use_cleaned_mask_noninter:
             if self.opt.prob_masks:
                 if index + self.opt.start_ind in self.dis_gt_indices:
                     masks[self.opt.fg_layer_ind - 1] = load_and_process_image(
@@ -397,7 +397,7 @@ class FactormatteGANCGANFlip148Dataset(BaseDataset):
                         size=(self.opt.width, self.opt.height),
                     )
             else:
-                print("Hasn't thought about init_flowmask when prob_masks = False.")
+                print("Hasn't thought about use_cleaned_mask_noninter when prob_masks = False.")
         mask_h, mask_w = masks[0].shape[-2:]
         masks = torch.stack(masks)  # L-1, 1, H, W
         binary_masks = (masks > 0).float()
@@ -556,29 +556,7 @@ class FactormatteGANCGANFlip148Dataset(BaseDataset):
                     )
                 dirname, filename = os.path.split(path[random_ind])
                 root_dir, img_dir = os.path.split(dirname)
-                if ("mask_" + img_dir in os.listdir(root_dir)) and (
-                    filename in os.listdir(os.path.join(root_dir, "mask_" + img_dir))
-                ):
-                    # print("found mask", root_dir, img_dir, filename, layer_name)
-                    # Should have either 1 or 0 as pixel value
-                    dis_mask = (
-                        load_and_process_image(
-                            os.path.join(root_dir, "mask_" + img_dir, filename),
-                            mode="L",
-                        )
-                        * 0.5
-                        + 0.5
-                    )
-                    # No need to apply_transform for these examples
-                    # dis_pos_mask = apply_transform(
-                    #     dis_pos_mask, transform_params, "bilinear"
-                    # )
-                else:
-                    dis_mask = torch.ones((1, dis_ex.size(1), dis_ex.size(2))).to(
-                        dis_ex
-                    )
-
-                data[layer_name] = torch.cat((dis_ex, dis_mask))
+                data[layer_name] = dis_ex
         return data
 
     def __len__(self):
@@ -690,9 +668,15 @@ class FactormatteGANCGANFlip148Dataset(BaseDataset):
         assert mask.min() == -1
         fg_mask = (mask > 0).float()
         bg_mask = (mask <= 0).float()
+        if 'composited' in self.opt.dataroot:
+            fg_mask = (mask == 1.).float()
+            bg_mask = (mask == -1.).float()
+            
         trimap_width = getattr(self.opt, "trimap_width", 20)
         trimap_width *= bg_mask.shape[-1] / self.opt.width
         trimap_width = int(trimap_width)
+        if 'composited' in self.opt.dataroot:
+            trimap_width = 12
         bg_mask = cv2.erode(
             bg_mask.numpy(), kernel=np.ones((trimap_width, trimap_width)), iterations=1
         )

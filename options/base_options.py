@@ -49,7 +49,7 @@ class BaseOptions:
         parser.add_argument(
             "--model",
             type=str,
-            default="omnimatte",
+            default="factormatte_GANFlip",
             help="chooses which model to use. [lnr | kp2uv]",
         )
         parser.add_argument(
@@ -74,7 +74,7 @@ class BaseOptions:
         parser.add_argument(
             "--dataset_mode",
             type=str,
-            default="omnimatte",
+            default="factormatte_GANCGANFlip148",
             help="chooses how datasets are loaded.",
         )
         parser.add_argument(
@@ -185,7 +185,7 @@ class BaseOptions:
         )
         parser.add_argument(
             "--n_layers",
-            default="0,3,3",
+            default="0,1,3",
             type=str,
             help="Number of stride in the convs of multiscale discriminators.",
         )
@@ -199,6 +199,11 @@ class BaseOptions:
             "--stage",
             type=int,
             help="Tells the dataset which dis_gt_alpha to use; index starting from 1. Stage 1: get bg, shouldn't have any dis_gt_alpha; stage 2: alpha from stage 1, for regularizing color, should run only on NFs; stage 3: alpha from stage 2 to constrain the alpha in IFs.",
+        )
+        parser.add_argument(
+            "--get_bg",
+            action="store_true",
+            help="if specified, generate the bg panorama and quit",
         )
         self.initialized = True
         return parser

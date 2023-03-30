@@ -38,7 +38,7 @@ class FactormatteGANFlipModel(BaseModel):
 
     @staticmethod
     def modify_commandline_options(parser, is_train=True):
-        parser.set_defaults(dataset_mode="factormatte_GAN")
+        parser.set_defaults(dataset_mode="factormatte_GANCGANFlip148")
         if is_train:
             parser.add_argument(
                 "--lambda_plausible_layers",
@@ -73,8 +73,8 @@ class FactormatteGANFlipModel(BaseModel):
             parser.add_argument(
                 "--lambda_alpha_warp",
                 type=float,
-                default=0.005,
-                help="alpha warping  loss weight",
+                default=0.1,
+                help="alpha warping loss weight",
             )
             parser.add_argument(
                 "--lambda_alpha_l1",
@@ -163,7 +163,7 @@ class FactormatteGANFlipModel(BaseModel):
             parser.add_argument(
                 "--lambda_rgb_warp",
                 type=float,
-                default=0.0,
+                default=0.1,
                 help="warped RGB loss weight",
             )
             parser.add_argument(
@@ -173,16 +173,16 @@ class FactormatteGANFlipModel(BaseModel):
                 help="Coefficient for RGBA recon loss.",
             )
             parser.add_argument(
-                "--lambda_recon_1",
+                "--lambda_afront_reg",
                 type=float,
                 default=0.0,
-                help="Coefficient for RGBA recon loss.",
+                help="Coefficient for front alpha layer regularization when there are double alpha layers sharing the same rgb.",
             )
             parser.add_argument(
-                "--lambda_recon_3",
+                "--lambda_mask_noninter",
                 type=float,
                 default=0.0,
-                help="Coefficient for RGBA recon loss.",
+                help="Coefficient for RGBA recon loss on non-interaction frames.",
             )
 
         return parser
@@ -310,8 +310,7 @@ class FactormatteGANFlipModel(BaseModel):
             "alpha_l1",
             "rgb_warp",
             "recon",
-            "recon_1",
-            "recon_3",
+            "mask_noninter",
         ]
         self.do_cam_adj = False
         # Bind with test setups so comment out the overlap here.
@@ -322,7 +321,12 @@ class FactormatteGANFlipModel(BaseModel):
         self.criterionLossMask_noreduce = MaskLoss_Noreduce().to(self.device)
         for name in self.lambda_names:
             if isinstance(name, str):
+                if name =='recon_3' or name =='recon_noninter':
+                    name ='mask_noninter'
+                if name =='recon_1':
+                    continue
                 setattr(self, "lambda_" + name, getattr(opt, "lambda_" + name))
+                
         self.mask_loss_rolloff_epoch = opt.mask_loss_rolloff_epoch
         self.jitter_rgb = opt.jitter_rgb
         self.optimizer = torch.optim.Adam(self.netfactormatteGAN.parameters(), lr=opt.lr)
@@ -354,6 +358,14 @@ class FactormatteGANFlipModel(BaseModel):
         self.writer = SummaryWriter(log_dir="517_runs/" + opt.name)
         self.maxpool = nn.MaxPool3d((2, 1, 1), stride=1)
         self.consistLoss = torch.nn.MSELoss()
+        
+        # TODO by Jac
+        self.dis_valid_G = [None, torch.ones((16, 41900), requires_grad=False).cuda(), \
+                            torch.ones((16, 42531), requires_grad=False).cuda()]
+        self.dis_valid_neg = [None, torch.zeros((16, 41900), requires_grad=False).cuda(), \
+                              torch.zeros((16, 42531), requires_grad=False).cuda()]
+        self.dis_valid_pos = [None, torch.ones((16, 685662), requires_grad=False).cuda(), \
+                              torch.ones((16, 61431), requires_grad=False).cuda()]
 
     def set_input(self, input):
         """Unpack input data from the dataloader and perform necessary pre-processing steps.
@@ -517,21 +529,9 @@ class FactormatteGANFlipModel(BaseModel):
                         normalized_rgba = self.discriminator_preprocessing(
                             normalized_rgba
                         )
-                        # self.dis_reals[i] = self.discriminator_preprocessing(
-                        #     self.dis_reals[i]
-                        # )
 
-                    mask = torch.ones(
-                        (
-                            normalized_rgba.size(0),
-                            1,
-                            normalized_rgba.size(2),
-                            normalized_rgba.size(3),
-                        ),
-                        requires_grad=False,
-                    ).cuda()
                     self.input_for_discriminators.append(
-                        torch.cat((normalized_rgba, mask), 1)
+                        normalized_rgba
                     )
                 else:
                     self.input_for_discriminators.append(None)
@@ -548,19 +548,19 @@ class FactormatteGANFlipModel(BaseModel):
             )
             self.loss_recon = self.lambda_recon * loss_recon
         self.loss_a_front_reg = 0
-        # if self.lambda_recon_1 != 0 and self.opt.model_v == 42:
-        #     self.loss_a_front_reg = self.lambda_recon_1 * torch.sum(
+        # if self.lambda_afront_reg != 0 and self.opt.model_v == 42:
+        #     self.loss_a_front_reg = self.lambda_afront_reg * torch.sum(
         #         torch.abs(1.0 + self.alpha_unnorm_fronts)
         #     )
 
-        self.loss_recon_noninter_fg = 0
-        if self.lambda_recon_3 != 0:
+        self.loss_mask_noninter_fg = 0
+        if self.lambda_mask_noninter != 0:
             assert (
-                self.opt.init_flowmask
-            ), "this must be used with init_flowmask, otherwise would be in conflict with criterionLossMask"
+                self.opt.use_cleaned_mask_noninter
+            ), "this must be used with use_cleaned_mask_noninter, otherwise would be in conflict with criterionLossMask"
             # a_l2 = self.output_rgba[:, 3:, 2] * 0.5 + 0.5
-            self.loss_recon_noninter_fg = (
-                self.lambda_recon_3
+            self.loss_mask_noninter_fg = (
+                self.lambda_mask_noninter
                 * (
                     self.dis_gt_exist.view(b_sz, 1, 1, 1)
                     * self.criterionLossMask_noreduce(
@@ -645,9 +645,10 @@ class FactormatteGANFlipModel(BaseModel):
         for i in range(self.n_layers):
             if self.discriminators[i] is not None:
                 # Let the discriminator look at the entire image when training the generator
-                validity, _ = self.discriminators[i](self.input_for_discriminators[i])
-                valid = torch.ones_like(validity, requires_grad=False)
-                g_loss = self.plausibleLoss(validity, valid).mean()
+                validity = self.discriminators[i](self.input_for_discriminators[i])
+#                 valid = torch.ones_like(validity, requires_grad=False)
+#                 print(valid.size())
+                g_loss = self.plausibleLoss(validity, self.dis_valid_G[i]).mean()
                 self.loss_plausible = (
                     self.loss_plausible + self.lambda_plausibles[i] * g_loss
                 )
@@ -663,61 +664,62 @@ class FactormatteGANFlipModel(BaseModel):
             + self.loss_plausible
             + self.loss_rgb_warp
             + self.loss_a_front_reg
-            + self.loss_recon_noninter_fg
+            + self.loss_mask_noninter_fg
             + self.loss_flow_div_reg
         )
 
         self.loss_total.backward()
         torch.cuda.empty_cache()
-        for name in self.loss_names:
-            if isinstance(name, str):
-                self.writer.add_scalar(
-                    "[train] loss_" + name, getattr(self, "loss_" + name), total_iters
-                )
-        for name in self.lambda_names:
-            if isinstance(name, str):
-                self.writer.add_scalar(
-                    "[train] lambda_" + name,
-                    getattr(self, "lambda_" + name),
-                    total_iters,
-                )
-        self.writer.add_scalar("[train] loss_recon_raw", self.loss_recon, total_iters)
-        self.writer.add_scalar(
-            "[train] loss_alpha_reg_raw", self.loss_alpha_reg, total_iters
-        )
-        self.writer.add_scalar("[train] loss_mask_raw", criterionLossMask, total_iters)
-        self.writer.add_scalar(
-            "[train] loss_recon_flow_raw", criterionLossFlow, total_iters
-        )
-        self.writer.add_scalar(
-            "[train] loss_alpha_warp_raw", criterionLossAlpha, total_iters
-        )
-        self.writer.add_scalar(
-            "[train] loss_recon_warp_raw", criterionLossWarped, total_iters
-        )
-        self.writer.add_scalar(
-            "[train] loss_adj_reg_raw", brightness_reg + offset_reg, total_iters
-        )
-        #         self.writer.add_scalar("[train] loss_plausible_l1_raw", g_loss_l1, total_iters)
-        #         self.writer.add_scalar("[train] loss_plausible_l2_raw", g_loss_l2, total_iters)
-        self.writer.add_scalar(
-            "[train] loss_residual_alpha_reg_raw",
-            torch.sum(torch.abs(1.0 + self.output_rgba[:, -1, self.res_ind])),
-            total_iters,
-        )
-        self.writer.add_scalar(
-            "[train] loss_residual_flow_reg_raw",
-            torch.sum(torch.abs(self.output_flow[:, :, self.res_ind])),
-            total_iters,
-        )
-        self.writer.add_scalar("[train] loss_grad_exclusive_raw", cos_sim, total_iters)
-        self.writer.add_scalar(
-            "[train] loss_rgb_warp_raw", criterionLossRGBWarped, total_iters
-        )
-        self.writer.add_scalar(
-            "[train] loss_flow_div_reg_raw", LossFlowDiv, total_iters
-        )
-        self.writer.flush()
+        if total_iters % (10*self.opt.batch_size) == 0:
+            for name in self.loss_names:
+                if isinstance(name, str):
+                    self.writer.add_scalar(
+                        "[train] loss_" + name, getattr(self, "loss_" + name), total_iters
+                    )
+            for name in self.lambda_names:
+                if isinstance(name, str):
+                    self.writer.add_scalar(
+                        "[train] lambda_" + name,
+                        getattr(self, "lambda_" + name),
+                        total_iters,
+                    )
+            self.writer.add_scalar("[train] loss_recon_raw", self.loss_recon, total_iters)
+            self.writer.add_scalar(
+                "[train] loss_alpha_reg_raw", self.loss_alpha_reg, total_iters
+            )
+            self.writer.add_scalar("[train] loss_mask_raw", criterionLossMask, total_iters)
+            self.writer.add_scalar(
+                "[train] loss_recon_flow_raw", criterionLossFlow, total_iters
+            )
+            self.writer.add_scalar(
+                "[train] loss_alpha_warp_raw", criterionLossAlpha, total_iters
+            )
+            self.writer.add_scalar(
+                "[train] loss_recon_warp_raw", criterionLossWarped, total_iters
+            )
+            self.writer.add_scalar(
+                "[train] loss_adj_reg_raw", brightness_reg + offset_reg, total_iters
+            )
+            #         self.writer.add_scalar("[train] loss_plausible_l1_raw", g_loss_l1, total_iters)
+            #         self.writer.add_scalar("[train] loss_plausible_l2_raw", g_loss_l2, total_iters)
+            self.writer.add_scalar(
+                "[train] loss_residual_alpha_reg_raw",
+                torch.sum(torch.abs(1.0 + self.output_rgba[:, -1, self.res_ind])),
+                total_iters,
+            )
+            self.writer.add_scalar(
+                "[train] loss_residual_flow_reg_raw",
+                torch.sum(torch.abs(self.output_flow[:, :, self.res_ind])),
+                total_iters,
+            )
+            self.writer.add_scalar("[train] loss_grad_exclusive_raw", cos_sim, total_iters)
+            self.writer.add_scalar(
+                "[train] loss_rgb_warp_raw", criterionLossRGBWarped, total_iters
+            )
+            self.writer.add_scalar(
+                "[train] loss_flow_div_reg_raw", LossFlowDiv, total_iters
+            )
+            self.writer.flush()
 
     def update_dis(self, total_iters):
         """Train the discriminators.
@@ -729,50 +731,35 @@ class FactormatteGANFlipModel(BaseModel):
         d_real_loss = 0
         for i in range(self.n_layers):
             if self.discriminators[i] is not None:
-                validity_real, valid_real_patches = self.discriminators[i](
-                    self.dis_reals[i]
-                )
-                valid_real_patches.requires_grad = False
-                valid = torch.ones_like(validity_real, requires_grad=False)
-                d_loss = (
-                    self.plausibleLoss(validity_real, valid) * valid_real_patches
-                ).mean()
+                validity_real = self.discriminators[i](self.dis_reals[i])
+#                 valid = torch.ones_like(validity_real, requires_grad=False)
+#                 print('update_dis, pos', validity_real.size(), i)
+                d_loss = self.plausibleLoss(validity_real, self.dis_valid_pos[i]).mean()
                 d_real_loss = d_real_loss + self.lambda_Ds[i] * d_loss
         # Loss for fake images
         d_fake_loss = 0
         for i in range(self.n_layers):
             if self.discriminators[i] is not None:
                 if self.dis_fakes[i] is not None:
-                    # input_for_discriminators = self.dis_fakes[i]
                     input_for_discriminators = torch.cat(
                         (self.input_for_discriminators[i].detach(), self.dis_fakes[i]),
                         0,
                     )
-                    # fake_inputs_np = (
-                    #     1 + self.dis_fakes[i].cpu().detach().permute(0, 2, 3, 1).numpy()
-                    # ) / 2
-                    # print(str(self.index[0, 0].cpu().detach().item()))
-                    # np.save(
-                    #     str(self.index[0, 0].cpu().detach().item()) + "fake_inputs.npy",
-                    #     fake_inputs_np,
-                    # )
                 else:
                     input_for_discriminators = self.input_for_discriminators[i].detach()
-                validity_fake, valid_fake_patches = self.discriminators[i](
-                    input_for_discriminators
-                )
-                valid_fake_patches.requires_grad = False
-                fake = torch.zeros_like(validity_fake, requires_grad=False)
-                d_loss = (
-                    self.plausibleLoss(validity_fake, fake) * valid_fake_patches
-                ).mean()
+                validity_fake = self.discriminators[i](input_for_discriminators) 
+#                 fake = torch.zeros_like(validity_fake, requires_grad=False)
+#                 print('update_dis, fake', validity_fake.size(), i)
+                d_loss = self.plausibleLoss(validity_fake, self.dis_valid_neg[i]).mean()
                 d_fake_loss = d_fake_loss + self.lambda_Ds[i] * d_loss
 
         self.loss_D = (d_real_loss + d_fake_loss) / 2
         self.loss_D.backward()
-        self.writer.add_scalar("[train] loss_real_D_raw", d_real_loss, total_iters)
-        self.writer.add_scalar("[train] loss_fake_D_raw", d_fake_loss, total_iters)
-        self.writer.flush()
+        
+        if total_iters % (10*self.opt.batch_size) == 0:
+            self.writer.add_scalar("[train] loss_real_D_raw", d_real_loss, total_iters)
+            self.writer.add_scalar("[train] loss_fake_D_raw", d_fake_loss, total_iters)
+            self.writer.flush()
 
     def gradient_debug(self, total_iters):
         """For visualizing the gradients of the discriminators. Set --gradient_debug and will stop the actual training.
@@ -820,12 +807,16 @@ class FactormatteGANFlipModel(BaseModel):
 
     def optimize_parameters(self, total_iters, epoch):
         """Update network weights; it will be called in every training iteration."""
+        import time
+        start = time.time()
         if (epoch - 1) % self.opt.update_G_epochs == 0:
             self.forward()
         else:
             with torch.no_grad():
                 self.forward()
+#         print('forward', time.time()-start)
         # Based on pix2pix implementation, first D then G.
+        start = time.time()
         if (epoch - 1) % self.opt.update_D_epochs == 0:
             self.loss_D = 0
             if self.optimizer_D is not None:
@@ -839,11 +830,13 @@ class FactormatteGANFlipModel(BaseModel):
                 for i in range(self.n_layers):
                     if self.discriminators[i] is not None:
                         self.set_requires_grad(self.discriminators[i], False)
+#         print('update D', time.time()-start)
+        start = time.time()
         if (epoch - 1) % self.opt.update_G_epochs == 0:
             self.optimizer.zero_grad()
             self.backward(total_iters)
             self.optimizer.step()
-
+#         print('update G', time.time()-start)
     def update_lambdas(self, epoch):
         """
         Update loss weights based on current epochs and losses.
@@ -859,7 +852,7 @@ class FactormatteGANFlipModel(BaseModel):
                 self.mask_loss_rolloff_epoch = epoch
                 self.lambda_mask *= 0.1
         # if epoch >= self.NF_FG_alpha_loss_rolloff_epoch:
-        #     self.lambda_recon_3 /= 2
+        #     self.lambda_mask_noninter /= 2
         if epoch >= self.opt.jitter_epochs:
             self.jitter_rgb = 0
         self.do_cam_adj = epoch >= self.opt.cam_adj_epoch
@@ -921,16 +914,16 @@ class FactormatteGANFlipModel(BaseModel):
         residual = self.transfer_detail()
         # self.rgba = self.output_rgba.clone()
         results = {
-            "reconstruction_no_cube": self.reconstruction_rgb_no_cube,
-            "residual": residual,
-            "reconstruction": self.reconstruction,
-            "original": self.target_image,
-            "reconstruction_flow": utils.tensor_flow_to_image(
-                self.reconstruction_flow[0]
-            ).unsqueeze(0),
-            "flow_gt": utils.tensor_flow_to_image(self.flow_gt[0], global_max=5).unsqueeze(0),
-            "bg_offset": utils.tensor_flow_to_image(self.bg_offset[0]).unsqueeze(0),
-            "brightness_scale": self.brightness_scale - 1.
+#             "reconstruction_no_cube": self.reconstruction_rgb_no_cube,
+#             "residual": residual,
+#             "reconstruction": self.reconstruction,
+#             "original": self.target_image,
+#             "reconstruction_flow": utils.tensor_flow_to_image(
+#                 self.reconstruction_flow[0]
+#             ).unsqueeze(0),
+#             "flow_gt": utils.tensor_flow_to_image(self.flow_gt[0], global_max=5).unsqueeze(0),
+#             "bg_offset": utils.tensor_flow_to_image(self.bg_offset[0]).unsqueeze(0),
+#             "brightness_scale": self.brightness_scale - 1.
         }
         # if self.opt.model_v == 42:
         #     results["rgba_l1_alpha_unnorm_backs"] = self.alpha_unnorm_backs
@@ -942,13 +935,13 @@ class FactormatteGANFlipModel(BaseModel):
         flow_layers = self.output_flow  # (self.rgba[:, -1:] * .5 + .5) *
         # Split layers
         for i in range(n_layers):
-            results[f"rgb_l{i}"] = self.rgba[:, :3, i]
+#             results[f"rgb_l{i}"] = self.rgba[:, :3, i]
             results[f"mask_l{i}"] = self.mask[:, i : i + 1]
             results[f"a_l{i}"] = self.rgba[:, 3:4, i]
-            results[f"rgb_warped_l{i}"] = self.rgb_warped[:, :, i]
-            results[f"a_warped_l{i}"] = self.alpha_warped[:, :, i]
+#             results[f"rgb_warped_l{i}"] = self.rgb_warped[:, :, i]
+#             results[f"a_warped_l{i}"] = self.alpha_warped[:, :, i]
             results[f"rgba_l{i}"] = self.rgba[:, :, i]
-            results[f"flow_l{i}"] = utils.tensor_flow_to_image(
-                flow_layers[0, :, i], global_max=5
-            ).unsqueeze(0)
+#             results[f"flow_l{i}"] = utils.tensor_flow_to_image(
+#                 flow_layers[0, :, i], global_max=5
+#             ).unsqueeze(0)
         return results

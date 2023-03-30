@@ -75,7 +75,8 @@ class TrainOptions(BaseOptions):
         )
         parser.add_argument(
             "--save_by_epoch",
-            action="store_true",
+            type=bool,
+            default=True,
             help='whether saves model as "epoch" or "latest" (overwrites previous)',
         )
         parser.add_argument(
@@ -139,9 +140,8 @@ class TrainOptions(BaseOptions):
         parser.add_argument(
             "--discriminator_transform",
             type=str,
-            default="none",
-            help="What transform to apply to omnimatte\
-        reconstruction before feeding into the discriminator.",
+            default="randomcrop",
+            help="What transform to apply to the generated rgb before feeding into the discriminator.",
         )
         parser.add_argument(
             "--jitter",

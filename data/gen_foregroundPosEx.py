@@ -1,4 +1,5 @@
 import sys
+sys.path.insert(0, '/home/zg45/FactorMatte')
 import torch
 import torchvision.models as models
 from torchvision import transforms as T
@@ -17,19 +18,20 @@ def prep_data(basedir, index):
     rgb_paths = sorted(make_dataset(os.path.join(basedir, 'rgb')))
     # mask_paths = sorted(make_dataset(os.path.join(basedir, 'l2_fake_real_comp_mask')))
     mask_paths = sorted(make_dataset(os.path.join(basedir, 'mask_nocushionmask/02/')))
-    gt = np.asarray(Image.open(rgb_paths[index]).convert('RGBA'))
-    mask = np.asarray(Image.open(mask_paths[index]).convert('L'))
+    gt = np.asarray(Image.open(rgb_paths[index]).convert('RGBA')).astype('float')
+    mask = np.asarray(Image.open(mask_paths[index]).convert('L')).astype('float')/255
+    mask[mask != 1.] = 0
     if abs(mask).sum() == 0:
         return None, None
-    mask[mask != 0] = 1
+#     if 'composited' in basedir:
         # Optionally erode to be conservative
-    mask = cv.erode(mask, kernel=np.ones((5, 5)), iterations=1)
+#         mask = cv.erode(mask, kernel=np.ones((12, 12)), iterations=1)
     mask = np.expand_dims(mask, -1)
     cube = np.where(mask != 0)
     up, down = cube[0].min(), cube[0].max()
     left, right = cube[1].min(), cube[1].max()
-    fg = gt * mask
-    return [left, right, up, down], fg
+    fg = np.clip(gt * mask, 0, 255)
+    return [left, right, up, down], fg.astype('uint8')
 
 def add_reflection(img, surface=140, alpha_range=[0, 0.75]):
     alpha = np.random.uniform(alpha_range[0], high=alpha_range[1])
@@ -145,9 +147,9 @@ def gen_pos_ex_fg(basedir, ind_low, ind_high, add_rot, add_flip, add_blurr_or_no
         
         
 if __name__ == '__main__':
-    datadir = 'datasets/DVM_womanfall'
+    datadir = 'datasets/composited/cloth/cloth_grail_5152'
     video_start_ind = 0
-    video_end_ind = 99
+    video_end_ind = 249
 
     # The probability of applying each augmentation during the generation of each positive example
     add_rot = 0 #0.5
@@ -163,7 +165,7 @@ if __name__ == '__main__':
     gaussian_noise_kwargs= {'std_range':[2, 7], 'mean':0}                           
 
     gen_pos_ex_fg(datadir, video_start_ind, video_end_ind, add_rot, add_flip, \
-                  add_blurr_or_noise, add_gaussian_noise, num=2500, blur_kwargs=blur_kwargs, \
-                    noise_kwargs=gaussian_noise_kwargs, folder_suffix='erode5')
+                  add_blurr_or_noise, add_gaussian_noise, num=1200, blur_kwargs=blur_kwargs, \
+                    noise_kwargs=gaussian_noise_kwargs, folder_suffix='')
 
         
