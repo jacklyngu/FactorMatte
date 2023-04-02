@@ -360,12 +360,13 @@ class FactormatteGANFlipModel(BaseModel):
         self.consistLoss = torch.nn.MSELoss()
         
         # TODO by Jac
-        self.dis_valid_G = [None, torch.ones((16, 41900), requires_grad=False).cuda(), \
-                            torch.ones((16, 42531), requires_grad=False).cuda()]
-        self.dis_valid_neg = [None, torch.zeros((16, 41900), requires_grad=False).cuda(), \
-                              torch.zeros((16, 42531), requires_grad=False).cuda()]
-        self.dis_valid_pos = [None, torch.ones((16, 685662), requires_grad=False).cuda(), \
-                              torch.ones((16, 61431), requires_grad=False).cuda()]
+        dim = 2*self.opt.batch_size
+        self.dis_valid_G = [None, torch.ones((dim, 41900), requires_grad=False).cuda(), \
+                            torch.ones((dim, 42531), requires_grad=False).cuda()]
+        self.dis_valid_neg = [None, torch.zeros((dim, 41900), requires_grad=False).cuda(), \
+                              torch.zeros((dim, 42531), requires_grad=False).cuda()]
+        self.dis_valid_pos = [None, torch.ones((dim, 685662), requires_grad=False).cuda(), \
+                              torch.ones((dim, 61431), requires_grad=False).cuda()]
 
     def set_input(self, input):
         """Unpack input data from the dataloader and perform necessary pre-processing steps.
